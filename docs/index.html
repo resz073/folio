@@ -23770,7 +23770,7 @@ const Backstage = {
   },
   async p_export(m) {
     m.appendChild(h('h1', null, 'Export'));
-    const quality = select([['vector', 'Sharp text (best, like Word)'], ['image3', 'Page pictures, print quality'], ['image2', 'Page pictures, smaller file']], 'vector', { id: 'pdfQuality', style: { maxWidth: '100%' } });
+    const quality = select([['vector', 'Sharp text (best)'], ['image3', 'Page pictures, print quality'], ['image2', 'Page pictures, smaller file']], 'vector', { id: 'pdfQuality', style: { maxWidth: '100%' } });
     const marks = h('input', { type: 'checkbox', id: 'pdfMarks', checked: true });
     const pdfOpts = () => quality.value === 'vector' ? { mode: 'vector', bookmarks: marks.checked } : { mode: 'image', scale: quality.value === 'image3' ? 3 : 2, quality: 0.9 };
     const item = (ext, color, title, desc, fn, extra) => { const b = h('button', { class: 'export-item', type: 'button' }, h('span', { class: 'ext', style: { background: color } }, ext), h('span', null, h('div', { class: 'et' }, title), h('div', { class: 'ed' }, desc))); b.addEventListener('click', fn); return extra ? h('div', null, b, extra) : b; };
