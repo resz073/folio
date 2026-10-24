@@ -39,3 +39,11 @@ Open an issue and include:
   - **Setup:** run `pip install playwright python-docx pillow pypdf fonttools`, then `python3 -m playwright install chromium` and `npm install jszip`. You also need poppler-utils (`pdftotext`, `pdfinfo`, `pdftoppm`); a few Word checks also use LibreOffice.
   - **Running:** start `python3 -m http.server 8765 --bind 127.0.0.1` in this folder, then run `bash tests/run_all.sh` for everything, or a single test such as `python3 tests/smoke.py`.
 - **Design notes:** `NOTES.md` has detailed notes on how each part works.
+
+## License
+
+Copyright (C) 2026 resz073
+
+Folio is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It comes with no warranty. See [LICENSE](LICENSE) for the full text.
+
+The fonts in `dist/fonts/` and `docs/fonts/` are not covered by this license. Each keeps its own license, listed in `dist/fonts/LICENSES.txt`.
