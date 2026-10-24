@@ -1,0 +1,66 @@
+import asyncio, sys, json, base64
+sys.path.insert(0, 'tests')
+from harness import *
+
+async def main():
+    async with async_playwright() as p:
+        b, page, errors = await new_page(p)
+        await load(page)
+        await page.add_script_tag(path='tests/checks.js')
+        await page.evaluate("() => __Q.newFromTemplate('blank')")
+        await page.click('#editor')
+        await page.keyboard.type('Quarterly Report')
+        await page.evaluate("() => __Q.setBlockStyle('title')")
+        await page.keyboard.press('End'); await page.keyboard.press('Enter')
+        await page.keyboard.type('Overview')
+        await page.keyboard.press('Control+Alt+1')
+        await page.keyboard.press('End'); await page.keyboard.press('Enter')
+        await page.keyboard.type('Sales grew in every region. The table below shows the totals.')
+        await page.keyboard.press('Enter')
+        # bullets
+        await page.keyboard.press('Control+Shift+L')
+        await page.keyboard.type('North up 12%')
+        await page.keyboard.press('Enter'); await page.keyboard.type('South up 8%')
+        await page.keyboard.press('Enter'); await page.keyboard.press('Tab'); await page.keyboard.type('Dhaka office led growth')
+        await page.keyboard.press('Enter'); await page.keyboard.press('Shift+Tab'); await page.keyboard.type('East flat')
+        await page.keyboard.press('Enter'); await page.keyboard.press('Enter')
+        await page.keyboard.type('Totals by region:')
+        await page.keyboard.press('Enter')
+        await page.evaluate("() => __Q.Tables.insert(3, 3, 'green')")
+        for t in ['Region', 'Q1', 'Q2']:
+            await page.keyboard.type(t); await page.keyboard.press('Tab')
+        for t in ['North', '120', '134', 'South', '98', '106']:
+            await page.keyboard.type(t); await page.keyboard.press('Tab')
+        await page.keyboard.type('East'); await page.keyboard.press('Tab'); await page.keyboard.type('77'); await page.keyboard.press('Tab'); await page.keyboard.type('78')
+        rows = await page.evaluate("() => document.querySelector('#editor table').rows.length")
+        print('table rows after tab-add:', rows)
+        html = await page.evaluate("() => __Q.cleanHTML()")
+        print(html[:1500])
+        # numbering after table
+        await page.evaluate("() => { const p = document.querySelector('#editor table').nextElementSibling; const r = document.createRange(); r.selectNodeContents(p); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }")
+        await page.keyboard.type('First recommendation')
+        await page.evaluate("() => __Q.toggleList('ol')")
+        await page.keyboard.press('Enter'); await page.keyboard.type('Second recommendation')
+        # alignment + font size + color
+        await page.keyboard.press('Home'); await page.keyboard.press('Shift+End')
+        await page.evaluate("() => { __Q.setFontSize(14); }")
+        await page.evaluate("() => __Q.applyInline({ color: '#c00000' })")
+        await page.keyboard.press('Control+e')
+        print('after fmt:', (await page.evaluate("() => __Q.cleanHTML()"))[-400:])
+        await page.screenshot(path='shots/04-built.png')
+        # merge cells: select first two cells of row 2
+        await page.evaluate("""() => { const t = document.querySelector('#editor table'); __Q.Tables.setRect(t.rows[1].cells[1], t.rows[1].cells[2]); __Q.Tables.merge(); }""")
+        print('merged row:', await page.evaluate("() => document.querySelector('#editor table').rows[1].outerHTML"))
+        await page.evaluate("() => { const t = document.querySelector('#editor table'); const c = t.rows[1].cells[1]; const r = document.createRange(); r.selectNodeContents(c); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); __Q.Tables.split(); }")
+        print('split row:', await page.evaluate("() => document.querySelector('#editor table').rows[1].cells.length"))
+        await page.evaluate("() => { const t = document.querySelector('#editor table'); const c = t.rows[0].cells[0]; const r = document.createRange(); r.selectNodeContents(c); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); __Q.Tables.insertCol(true); __Q.Tables.insertRow(false); }")
+        print('grid after col/row insert:', await page.evaluate("() => { const t = document.querySelector('#editor table'); return [...t.rows].filter(r=>!r.classList.contains('pg-spacer')).map(r => r.cells.length); }"))
+        # export docx
+        b64 = await page.evaluate("""async () => { const blob = await __Q.buildDocx(); const buf = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000)); return btoa(s); }""")
+        open('shots/test1.docx', 'wb').write(base64.b64decode(b64))
+        print('docx bytes', len(base64.b64decode(b64)))
+        md = await page.evaluate("() => __Q.toMarkdown()")
+        print('MD:\n' + md[:900])
+        for e in errors: print('ERR', e)
+        await b.close()
+asyncio.run(main())

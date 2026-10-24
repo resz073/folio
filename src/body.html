@@ -1,0 +1,72 @@
+<div class="app" id="app">
+  <header class="titlebar">
+    <div class="brand" aria-label="Folio"><span class="brand-mark" aria-hidden="true"></span><span class="word">Folio</span></div>
+    <div class="qat">
+      <button class="tb-btn" id="qatSave" type="button" title="Save (Ctrl+S)" aria-label="Save"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M8 4v5h7V4"/><path d="M8 20v-6h8v6"/></svg></button>
+      <button class="tb-btn" id="qatUndo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+      <button class="tb-btn" id="qatRedo" type="button" title="Redo (Ctrl+Y)" aria-label="Redo"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+    </div>
+    <div class="title-wrap">
+      <input id="docTitle" data-avro class="doc-title" aria-label="Document name" spellcheck="false" autocomplete="off">
+      <span class="save-state" id="saveState" data-state="saved"><span class="dot"></span><span class="txt">Saved</span></span>
+    </div>
+    <label class="search-box" for="titleSearch"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width:15px;height:15px"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg><input id="titleSearch" placeholder="Search (Ctrl+F)" autocomplete="off" spellcheck="false"></label>
+    <div class="title-right">
+      <button class="tb-btn" id="btnShortcuts" type="button" title="Keyboard shortcuts" aria-label="Keyboard shortcuts"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="1.8"/><path d="M6 9.5h.01M9 9.5h.01M12 9.5h.01M15 9.5h.01M18 9.5h.01M8 15h8" stroke-width="1.9"/></svg></button>
+      <button class="tb-btn" id="btnTheme" type="button" title="Theme" aria-label="Theme"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></svg></button>
+    </div>
+  </header>
+  <nav class="tabs" id="tabs" role="tablist" aria-label="Ribbon"></nav>
+  <section class="ribbon" id="ribbon" aria-label="Ribbon commands"></section>
+  <div class="banner" id="banner" hidden></div>
+  <div class="ruler-wrap" id="rulerWrap"><canvas id="ruler" aria-hidden="true"></canvas><div id="rulerMarks"></div></div>
+  <div class="workspace" id="workspace">
+    <aside class="pane left" id="navPane" hidden aria-label="Navigation">
+      <div class="pane-head"><h2>Navigation</h2><button class="tb-btn" id="navClose" type="button" aria-label="Close navigation" title="Close"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></div>
+      <div class="pane-body">
+        <input class="nav-search" id="navSearch" placeholder="Search document" autocomplete="off" aria-label="Search document">
+        <div id="navResults"></div>
+        <ul class="outline" id="outline"></ul>
+      </div>
+    </aside>
+    <div class="canvas" id="canvas">
+      <div class="zoom-box" id="zoomBox">
+        <div class="paper" id="paper">
+          <div class="sheets" id="sheets"></div>
+          <div class="editor doc" id="editor" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="Document"></div>
+          <div id="overlay"></div>
+        </div>
+      </div>
+    </div>
+    <aside class="pane" id="sidePane" hidden aria-label="Side pane">
+      <div class="pane-head">
+        <div class="pane-tabs" role="tablist">
+          <button class="pane-tab" type="button" role="tab" data-pane="comments">Comments <span id="cmtCount" class="note"></span></button>
+          <button class="pane-tab" type="button" role="tab" data-pane="fields">Fields</button>
+          <button class="pane-tab" type="button" role="tab" data-pane="assistant">Claude</button>
+          <button class="pane-tab" type="button" role="tab" data-pane="styles">Styles</button>
+        </div>
+        <button class="tb-btn" id="paneClose" type="button" aria-label="Close pane" title="Close"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+      </div>
+      <div class="pane-body">
+        <section class="pane-section" data-section="comments">
+          <div class="asst-row" style="margin-bottom:10px;align-items:center;justify-content:space-between">
+            <button class="btn" id="newCommentBtn" type="button">New comment</button>
+            <label class="check" style="margin:0"><input type="checkbox" id="showResolved" checked> Show resolved</label>
+          </div>
+          <div id="commentList"></div>
+        </section>
+        <section class="pane-section" data-section="fields" hidden></section>
+        <section class="pane-section" data-section="assistant" hidden></section>
+        <section class="pane-section" data-section="styles" hidden></section>
+      </div>
+    </aside>
+  </div>
+  <footer class="statusbar" id="statusbar"></footer>
+  <button class="btn focus-exit" id="focusExit" type="button">Exit full view</button>
+</div>
+<div id="backstage" class="backstage" hidden></div>
+<div id="popRoot"></div>
+<div id="floatRoot"></div>
+<div class="toast-root" id="toastRoot" aria-live="polite"></div>
+<div class="render-host" id="renderHost" aria-hidden="true"></div>

@@ -1,0 +1,170 @@
+/* ---------- Document content (paper is always white; colors here are document data) ---------- */
+.doc { font-family: var(--doc-font); font-size: var(--doc-size); --lhm: var(--doc-line, 1.08); --lhr: var(--doc-r, 1.2207); line-height: calc(var(--lhm) * var(--lhr)); color: #000; white-space: pre-wrap; overflow-wrap: break-word; tab-size: 48px; -moz-tab-size: 48px; font-kerning: normal; font-variant-ligatures: common-ligatures; }
+/* Line spacing as in Word: the multiple (--lhm, Word's value) times the font's own single line
+   (--lhr). Inline text keeps its paragraph's factor; the layout (LineH) marks paragraphs that
+   need another one with data-lh. */
+.doc :is(p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, pre, div, dd, dt) { --lhf: calc(var(--lhm) * var(--lhr)); line-height: var(--lhf); }
+.doc :not(p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, pre, div, dd, dt, ul, ol, dl, table, thead, tbody, tfoot, tr, colgroup, col, caption, hr, img, br, .fn, .fnn) { line-height: var(--lhf); }
+.doc :is(h1, h2, h3, h4, h5, h6, p.title, p.subtitle) { --lhr: var(--head-r, var(--doc-r, 1.2207)); }
+.doc p, .doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 { margin: 0 0 var(--doc-after, 8pt); }
+.doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6, .doc p.title, .doc p.subtitle { font-family: var(--doc-head-font, var(--doc-font)); }
+.doc p.nospacing { margin: 0; --lhm: 1; }
+/* headers and footers: Word's Header and Footer styles have single spacing and no space after */
+.hfx.doc { --lhm: 1; --doc-after: 0pt; display: flow-root; white-space: pre-wrap; }
+.hfx.doc table { margin: 0; }
+.doc p.title { font-size: 26pt; --lhm: 1.05; letter-spacing: -0.01em; margin: 0 0 4pt; color: #17202e; }
+.doc p.subtitle { font-size: 13pt; color: #5a5a5a; letter-spacing: .01em; margin: 0 0 10pt; }
+.doc h1 { font-size: 16pt; font-weight: 700; color: #1f3a5f; margin: 12pt 0 4pt; --lhm: 1.1; }
+.doc h2 { font-size: 13pt; font-weight: 700; color: #1f3a5f; margin: 10pt 0 3pt; --lhm: 1.1; }
+.doc h3 { font-size: 12pt; font-weight: 700; color: #2a4a70; margin: 8pt 0 2pt; --lhm: 1.1; }
+.doc h4 { font-size: 11pt; font-weight: 700; font-style: italic; color: #2a4a70; margin: 6pt 0 2pt; }
+.doc h5 { font-size: 11pt; font-weight: 600; color: #2a4a70; margin: 6pt 0 2pt; }
+.doc h6 { font-size: 11pt; font-weight: 400; font-style: italic; color: #2a4a70; margin: 6pt 0 2pt; }
+.doc p.quote { font-style: italic; color: #404040; border-left: 3px solid #c8c8c8; padding-left: 12pt; margin: 6pt 24pt 10pt 0; }
+.doc p.code { font-family: Consolas, Cousine, "Courier New", monospace; font-size: 10pt; background: #f2f3f3; padding: 1pt 6pt; margin: 0; --lhm: 1.1; --lhr: 1.1709; }
+.doc p.code + p:not(.code) { margin-top: var(--doc-after, 8pt); }
+.doc ul, .doc ol { margin: 0 0 var(--doc-after, 8pt); padding-left: 0.5in; }
+.doc li { margin: 0; padding-left: 2pt; }
+.doc li > p { margin: 0; }
+.doc li > ul, .doc li > ol, .doc ul > ul, .doc ul > ol, .doc ol > ol, .doc ol > ul { margin: 0; }
+.doc ul { list-style-type: disc; }
+.doc ul ul { list-style-type: circle; }
+.doc ul ul ul { list-style-type: square; }
+.doc ol { list-style-type: decimal; }
+.doc ol ol { list-style-type: lower-alpha; }
+.doc ol ol ol { list-style-type: lower-roman; }
+@counter-style decimal-paren { system: extends decimal; suffix: ") "; }
+@counter-style lower-alpha-paren { system: extends lower-alpha; suffix: ") "; }
+@counter-style bengali-dot { system: extends bengali; suffix: ". "; }
+/* more list numbers (Numbering Library, Multilevel List): Bangla ones as government letters number
+   paragraphs (১। then (ক) then (১)), English ones in brackets, and lists numbered 1.1, 1.1.1 */
+@counter-style bn-dari { system: extends bengali; suffix: "। "; }
+@counter-style bn-close { system: extends bengali; suffix: ") "; }
+@counter-style bn-paren { system: extends bengali; prefix: "("; suffix: ") "; }
+@counter-style bn-alpha { system: alphabetic; symbols: 'ক' 'খ' 'গ' 'ঘ' 'ঙ' 'চ' 'ছ' 'জ' 'ঝ' 'ঞ' 'ট' 'ঠ' 'ড' 'ঢ' 'ণ' 'ত' 'থ' 'দ' 'ধ' 'ন' 'প' 'ফ' 'ব' 'ভ' 'ম' 'য' 'র' 'ল' 'শ' 'ষ' 'স' 'হ'; suffix: ") "; }
+@counter-style bn-alpha-paren { system: extends bn-alpha; prefix: "("; suffix: ") "; }
+@counter-style paren-decimal { system: extends decimal; prefix: "("; suffix: ") "; }
+@counter-style paren-lower-alpha { system: extends lower-alpha; prefix: "("; suffix: ") "; }
+@counter-style paren-lower-roman { system: extends lower-roman; prefix: "("; suffix: ") "; }
+@counter-style lower-roman-paren { system: extends lower-roman; suffix: ") "; }
+.doc ol[data-ml="bn"] { list-style-type: bn-dari; }
+.doc ol[data-ml="bn"] ol { list-style-type: bn-alpha-paren; }
+.doc ol[data-ml="bn"] ol ol { list-style-type: bn-paren; }
+.doc ol[data-ml="bn"] ol ol ol { list-style-type: lower-roman-paren; }
+.doc ol[data-ml="paren"] { list-style-type: paren-decimal; }
+.doc ol[data-ml="paren"] ol { list-style-type: paren-lower-alpha; }
+.doc ol[data-ml="paren"] ol ol { list-style-type: paren-lower-roman; }
+.doc ol[data-ml="outline"] { list-style-type: upper-roman; }
+.doc ol[data-ml="outline"] ol { list-style-type: upper-alpha; }
+.doc ol[data-ml="outline"] ol ol { list-style-type: decimal; }
+.doc ol[data-ml="outline"] ol ol ol { list-style-type: lower-alpha; }
+.doc ol[data-ml="legal"], .doc ol[data-ml="legal"] ol, .doc ol[data-ml="bn-legal"], .doc ol[data-ml="bn-legal"] ol { list-style-type: decimal; }
+.doc ol[data-ml="legal"] li::marker { content: counters(list-item, ".") ". "; }
+.doc ol[data-ml="bn-legal"] li::marker { content: counters(list-item, ".", bengali) ". "; }
+.doc ul.checklist { list-style: none; padding-left: 0.1in; }
+.doc ul.checklist > li { padding-left: 1.6em; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1.5' y='1.5' width='13' height='13' rx='2.5' fill='white' stroke='%23555' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat 0 calc(var(--pgp, 0px) + .16em) / .98em .98em; }
+.doc ul.checklist > li[data-checked="true"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1.5' y='1.5' width='13' height='13' rx='2.5' fill='%231d6a50'/%3E%3Cpath d='M4.5 8.3l2.3 2.3 4.8-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); color: #6b6b6b; text-decoration: line-through; }
+.doc table { border-collapse: collapse; margin: 0 0 var(--doc-after, 8pt); table-layout: fixed; }
+.doc td, .doc th { padding: 1.5pt 5.4pt; vertical-align: top; text-align: left; font-weight: inherit; border: 1px solid #000; overflow-wrap: anywhere; }
+.doc td > p, .doc th > p, .doc td > h1, .doc td > h2, .doc td > h3 { margin: 0; }
+/* numbers lined up on the decimal point: right-aligned, padded by the layout (DecAlign) */
+.doc [data-align="decimal"] { text-align: right; padding-right: var(--decpad, 0px) !important; }
+.doc table.tbl-plain td, .doc table.tbl-plain th { border: 1px dashed #cdd6dd; }
+.doc table.tbl-lines td, .doc table.tbl-lines th { border: 0; border-bottom: 1px solid #9a9a9a; }
+.doc table.tbl-lines tr:nth-child(1 of :not(.pg-spacer)) > * { border-bottom: 1.5px solid #000; border-top: 1.5px solid #000; }
+.doc table.tbl-c-gray { --tb: #a6a6a6; --th: #e7e6e6; --thc: #000; --tf: #f4f4f4; }
+.doc table.tbl-c-green { --tb: #8fbfac; --th: #1d6a50; --thc: #fff; --tf: #e8f3ee; }
+.doc table.tbl-c-blue { --tb: #9db7d5; --th: #2f5597; --thc: #fff; --tf: #e9eff7; }
+.doc table.tbl-c-amber { --tb: #e2c27a; --th: #f2c14e; --thc: #000; --tf: #fdf5e2; }
+.doc table[class*="tbl-c-"] td, .doc table[class*="tbl-c-"] th { border: 1px solid var(--tb); }
+.doc table.hdr tr:nth-child(1 of :not(.pg-spacer)) > * { font-weight: 700; background: var(--th, transparent); color: var(--thc, inherit); }
+.doc table.band tr:nth-child(even of :not(.pg-spacer)) > * { background: var(--tf, #f2f2f2); }
+/* tables with their own borders: inside lines everywhere, the outside lines on edge cells */
+.doc table.tbl-bd > * > tr > td, .doc table.tbl-bd > * > tr > th { border-top: var(--bh, none); border-bottom: var(--bh, none); border-left: var(--bv, none); border-right: var(--bv, none); }
+.doc table.tbl-bd > * > tr > [data-edge~="t"] { border-top: var(--bt, none); }
+.doc table.tbl-bd > * > tr > [data-edge~="b"] { border-bottom: var(--bb, none); }
+.doc table.tbl-bd > * > tr > [data-edge~="l"] { border-left: var(--bl, none); }
+.doc table.tbl-bd > * > tr > [data-edge~="r"] { border-right: var(--br, none); }
+#paper.no-gridlines .doc table.tbl-plain td, #paper.no-gridlines .doc table.tbl-plain th { border-color: transparent; }
+.doc tr.pg-spacer, .doc tr.pg-spacer > td { border: 0 !important; padding: 0 !important; background: transparent !important; }
+/* paragraphs with the same borders share one box */
+#paper:not(.exporting-docx) .doc [data-bj~="n"] { margin-bottom: 0 !important; padding-bottom: calc(var(--pb0, 0px) + var(--bjg, 0px)) !important; border-bottom: var(--bbtw, none) !important; box-shadow: var(--bjsh, none) !important; }
+#paper:not(.exporting-docx) .doc [data-bj~="p"] { margin-top: 0 !important; border-top: none !important; }
+.doc img { max-width: 100%; height: auto; vertical-align: bottom; }
+.doc img.img-left { float: left; margin: 2pt 10pt 4pt 0; }
+.doc img.img-right { float: right; margin: 2pt 0 4pt 10pt; }
+.doc img.img-center { display: block; margin: 4pt auto; }
+.doc img.img-border { border: 1px solid #000; }
+/* In Front of Text / Behind Text: out of the line, placed from the start of its paragraph */
+.doc :is(p, h1, h2, h3, h4, h5, h6, li, td, th, blockquote, pre, div, dd, dt):has(img.img-front, img.img-behind, span.shp.img-front, span.shp.img-behind) { position: relative; }
+.doc img.img-front, .doc img.img-behind { position: absolute; margin: 0; max-width: none; touch-action: none; }
+.doc img.img-front { z-index: 2; }
+.doc img.img-behind { z-index: -1; }
+/* shapes and text boxes (Shapes): drawn in a shadow root of their own; in the line their bottom
+   sits on the baseline, as in Word */
+.doc span.shp { display: inline-block; position: relative; vertical-align: baseline; }
+.doc span.shp.img-front, .doc span.shp.img-behind { position: absolute; margin: 0; touch-action: none; }
+.doc span.shp.img-front { z-index: 2; }
+.doc span.shp.img-behind { z-index: -1; }
+.doc span.shp.img-left { float: left; margin: 2pt 10pt 4pt 0; }
+.doc span.shp.img-right { float: right; margin: 2pt 0 4pt 10pt; }
+.doc span.shp.img-center { display: block; margin: 4pt auto; }
+.doc a { color: #0563c1; text-decoration: underline; }
+.doc hr { border: 0; border-top: 1px solid #8c8c8c; margin: 6pt 0 10pt; height: 0; }
+.doc hr.pb { border: 0; margin: 0; height: 1px; }
+/* a section break: nothing on the page (the next section starts its page, or goes on); with the
+   formatting marks shown, Word's double dotted line and its kind */
+.doc hr.sb { border: 0; margin: 0; height: 0; overflow: visible; }
+/* a section's text column, when it isn't the first section's (layout only) */
+.doc > [data-sx] { margin-left: var(--sxl) !important; margin-right: var(--sxr) !important; }
+.doc > table[data-sx][style*="--sxw"] { width: var(--sxw) !important; }
+.doc .cols { column-count: var(--cols, 2); column-gap: 0.5in; margin: 0 0 var(--doc-after, 8pt); }
+.doc .cols > :first-child { margin-top: 0; }
+.doc sup.fn { font-size: 0.68em; vertical-align: super; line-height: 0; color: #000; cursor: pointer; user-select: all; }
+/* footnotes and endnotes (Notes): Word's Footnote Text style, 10 pt, single, no space after; the
+   number before the text is the note's own (not editable), a little space after it */
+.fn-area.doc, .en-area.doc { --lhm: 1; --doc-after: 0pt; white-space: pre-wrap; }
+.doc .fnote, .doc .enote, .doc.fnote, .doc.enote { font-size: 10pt; --lhm: 1; --doc-after: 0pt; }
+.doc sup.fnn { font-size: 0.68em; vertical-align: super; line-height: 0; margin-right: .32em; user-select: none; }
+.doc .fn-sep { position: relative; height: calc(1em * var(--doc-r, 1.2207)); }
+.doc .fn-rule { position: absolute; left: 0; top: 50%; width: 2in; border-top: 0.75px solid #000; }
+.doc .toc { margin: 0 0 12pt; user-select: none; cursor: default; white-space: normal; border-radius: 2px; }
+.doc .toc .toc-title { font-size: 14pt; font-weight: 700; color: #1f3a5f; margin: 0 0 6pt; font-family: var(--doc-head-font, var(--doc-font)); }
+.doc .toc .te { display: flex; align-items: baseline; gap: 4pt; margin: 0 0 3pt; white-space: nowrap; }
+.doc .toc .te .tt { overflow: hidden; text-overflow: ellipsis; }
+.doc .toc .te .td { flex: 1; border-bottom: 1.5px dotted #444; min-width: 12pt; transform: translateY(-3px); }
+.doc .toc .te .tp { flex: none; }
+.doc .toc .te.l2 { padding-left: 14pt; }
+.doc .toc .te.l3 { padding-left: 28pt; }
+.doc .toc .toc-empty { color: #777; font-style: italic; }
+.doc [data-pgp]::before { content: ""; display: block; height: var(--pgp); }
+.doc span.pg-line { display: inline; vertical-align: bottom; user-select: none; pointer-events: none; font-size: inherit; }
+.doc span.qm { display: inline; }
+.doc .cmt { background: rgba(250, 204, 21, .3); border-bottom: 1.5px solid rgba(214, 158, 0, .75); }
+.doc .cmt.on { background: rgba(250, 204, 21, .62); }
+.doc .cmt.resolved { background: transparent; border-bottom: 1px dotted rgba(214, 158, 0, .7); }
+.doc ins.tc { color: var(--tcc, #b5179e); text-decoration: underline; text-decoration-thickness: 1px; }
+.doc del.tc { color: var(--tcc, #b5179e); text-decoration: line-through; }
+.doc.tc-final del.tc { display: none; }
+.doc.tc-final ins.tc { color: inherit; text-decoration: none; }
+.doc.tc-original ins.tc { display: none; }
+.doc.tc-original del.tc { color: inherit; text-decoration: none; }
+.doc.show-marks p::after, .doc.show-marks h1::after, .doc.show-marks h2::after, .doc.show-marks h3::after, .doc.show-marks h4::after, .doc.show-marks h5::after, .doc.show-marks h6::after, .doc.show-marks li:not(:has(> ul, > ol))::after { content: "¶"; color: #3d7cc4; opacity: .55; font-weight: 400; font-style: normal; font-size: 10pt; margin-left: 1px; text-decoration: none; display: inline; }
+.doc.show-marks td > p:last-child::after { content: "¤"; }
+.doc.show-marks hr.pb { border-top: 1px dashed #5a8fc4; height: 0; margin: 4pt 0; overflow: visible; }
+.doc.show-marks hr.sb { border-top: 3px double #5a8fc4; height: 0; margin: 6pt 0; position: relative; }
+.doc.show-marks hr.sb::after { position: absolute; left: 50%; top: -8px; transform: translateX(-50%); padding: 0 6px; background: #fff; color: #3d6fa8; font: 400 8pt/14px system-ui, sans-serif; white-space: nowrap; }
+.doc.show-marks hr.sb::after, .doc.show-marks hr.sb[data-sb="next"]::after { content: "Section Break (Next Page)"; }
+.doc.show-marks hr.sb[data-sb="cont"]::after { content: "Section Break (Continuous)"; }
+.doc.show-marks hr.sb[data-sb="even"]::after { content: "Section Break (Even Page)"; }
+.doc.show-marks hr.sb[data-sb="odd"]::after { content: "Section Break (Odd Page)"; }
+.doc.show-marks .cols { outline: 1px dashed #9ab3c9; outline-offset: 2px; }
+.doc.hide-comments .cmt { background: none; border-bottom: 0; }
+.doc.ro { caret-color: transparent; }
+.exporting .doc .cmt, .exporting .cmt { background: none !important; border-bottom: 0 !important; }
+.exporting .doc table.tbl-plain td, .exporting .doc table.tbl-plain th { border-color: transparent !important; }
+.exporting .doc .toc { background: none !important; }
+.exporting-docx .doc ins.tc, .exporting-docx .doc del.tc { color: inherit !important; text-decoration: none !important; background: none !important; }
+::highlight(q-find) { background-color: #fde68a; color: #000; }
+::highlight(q-cur) { background-color: #fb923c; color: #000; }
+::highlight(q-speak) { background-color: #bfdbfe; color: #000; }

@@ -1,0 +1,373 @@
+"""Pictures: rotate right/left, flip, and the composition of turns and flips (pixels checked);
+Reset Picture; crop (the crop frame's handles with the mouse, on a straight and a turned picture;
+Enter/Esc/click elsewhere finish; undo); the rotation handle (Shift snaps); Remove Background
+(paper transparent, ink kept or recoloured; the dialog); In Front of Text / Behind Text (kept in
+place, anchored to the paragraph, dragged and re-anchored, arrow keys, resized from the left,
+aligned in the column, painted above/below the text on screen and in the PDF's layers);
+.docx out (wp:anchor, behindDoc, offsets) and back in; Word's own crop/turn/flip on import;
+copy and paste inside Folio; signatures: draw one, Insert › Signature, add from a photo with
+the paper removed and trimmed, save a picture, manage (rename, delete, undo); read-only."""
+import asyncio, sys, json, base64, io, zipfile, re, os, tempfile
+sys.path.insert(0, 'tests')
+from harness import *
+from PIL import Image
+
+fails = []
+def ok(cond, what, got=None):
+    print(('  ok   ' if cond else '  FAIL ') + what + ('' if cond or got is None else '  -> ' + json.dumps(got, ensure_ascii=False)))
+    if not cond: fails.append(what)
+
+# a "photo" of a signature: paper with uneven light, a red mark top-left, a green one top-right, blue ink
+MKIMG = """() => {
+  const c = document.createElement('canvas'); c.width = 600; c.height = 300;
+  const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 600, 300); gr.addColorStop(0, 'rgb(236,232,224)'); gr.addColorStop(1, 'rgb(200,195,186)');
+  g.fillStyle = gr; g.fillRect(0, 0, 600, 300);
+  g.fillStyle = 'rgb(220,30,30)'; g.fillRect(0, 0, 40, 40);
+  g.fillStyle = 'rgb(30,160,40)'; g.fillRect(560, 0, 40, 40);
+  g.strokeStyle = 'rgb(30,50,140)'; g.lineWidth = 9; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(120, 200); g.bezierCurveTo(180, 40, 260, 260, 320, 120); g.bezierCurveTo(360, 40, 420, 240, 480, 150); g.stroke();
+  return c.toDataURL('image/jpeg', 0.95);
+}"""
+# the colour of a picture's pixel at fractions of its width/height: [r, g, b, a]
+PIX = """([fx, fy]) => new Promise(res => { const i = document.querySelector('#editor img'); const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d'); g.drawImage(im, 0, 0); res(Array.from(g.getImageData(Math.min(c.width - 1, Math.floor(fx * c.width)), Math.min(c.height - 1, Math.floor(fy * c.height)), 1, 1).data)); }; im.src = i.src; })"""
+INFO = "() => { const i = document.querySelector('#editor img'); return { nw: i.naturalWidth, nh: i.naturalHeight, w: i.style.width, h: i.style.height, xf: JSON.parse(i.getAttribute('data-xf') || 'null'), orig: i.hasAttribute('data-orig'), cls: i.className }; }"
+RECT = "() => { const r = document.querySelector('#editor img').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }"
+# where a line of text crosses the picture: [index of the paragraph, index of the picture] from the top
+ORDER = """() => { const i = document.querySelector('#editor img'), r = i.getBoundingClientRect();
+  const p = [...document.querySelectorAll('#editor p')].find(p => { const b = p.getBoundingClientRect(); return p !== i.parentElement && b.top > r.top && b.bottom < r.bottom; });
+  if (!p) return [-1, -1];
+  const b = p.getBoundingClientRect(), els = document.elementsFromPoint(r.left + Math.min(40, r.width / 3), (b.top + b.bottom) / 2);
+  return [els.indexOf(p), els.indexOf(i)]; }"""
+def red(px): return px[0] > 150 and px[1] < 90 and px[2] < 90
+def green(px): return px[1] > 120 and px[0] < 90 and px[2] < 100
+def near(a, b, t=1.5): return all(abs(x - y) <= t for x, y in zip(a, b))
+
+async def main():
+    async with async_playwright() as p:
+        b, page, errors = await new_page(p, width=1366, height=900, mock_caps=True, gfonts=True)
+        await load(page)
+        st = lambda js, *a: page.evaluate(js, *a)
+        url = await st(MKIMG)
+        html = '<p>First paragraph of the letter, with some words to show where text runs.</p>' + f'<p><img src="{url}" style="width:300px"></p>' + ''.join(f'<p>Line {i} of the body text that the stamp will sit over.</p>' for i in range(8))
+        await st("h => __Q.openDoc(__Q.newDocModel({ title: 'Pictures', html: h }))", html)
+        await page.wait_for_timeout(800)
+        sel = lambda: st("() => __Q.Images.select(document.querySelector('#editor img'))")
+        await sel()
+        await page.wait_for_timeout(150)
+
+        print('1. rotate and flip')
+        ok(await page.locator('#tab-picture[aria-selected=true]').count() == 1 and await page.locator('.rb:visible:has(.cap:text-is("Crop"))').count() == 1, 'the Picture tab has Crop, Rotate, Remove Background, Reset Picture')
+        ok(await st("() => !!document.querySelector('.img-frame .hd.rot')"), 'the selected picture has a rotation handle')
+        await st("() => __Q.CMD.rotateRight()"); await page.wait_for_timeout(500)
+        i = await st(INFO)
+        ok(i['nw'] == 300 and i['nh'] == 600 and i['w'] == '150px' and i['xf']['r'] == 90 and i['orig'], 'Rotate Right 90° turns it, at the same scale, keeping the original', i)
+        ok(red(await st(PIX, [0.95, 0.03])) and green(await st(PIX, [0.95, 0.97])), 'the top-left corner is now top-right')
+        await st("() => __Q.CMD.flipH()"); await page.wait_for_timeout(500)
+        i = await st(INFO)
+        ok(i['xf']['r'] == 270 and i['xf']['fh'] == 1 and red(await st(PIX, [0.05, 0.03])), 'Flip Horizontal flips it as shown (the turn reverses)', i['xf'])
+        await st("() => __Q.CMD.flipV()"); await page.wait_for_timeout(500)
+        i = await st(INFO)
+        ok(i['xf']['r'] == 270 and not i['xf']['fh'] and not i['xf']['fv'] and red(await st(PIX, [0.05, 0.97])), 'both flips are a half turn', i['xf'])
+        await st("() => __Q.CMD.rotateRight()"); await page.wait_for_timeout(500)
+        i = await st(INFO)
+        ok(i['nw'] == 600 and i['xf'] is None and not i['orig'] and i['w'] == '300px', 'turned back to the start, it is the original again', i)
+        await st("() => __Q.CMD.rotateLeft()"); await page.wait_for_timeout(500)
+        await st("() => __Q.CMD.resetPic()"); await page.wait_for_timeout(500)
+        i = await st(INFO)
+        ok(i['nw'] == 600 and i['xf'] is None and i['w'] == '300px', 'Reset Picture brings the original back', i)
+
+        print('2. crop')
+        await page.click('.rb:visible:has(.cap:text-is("Crop"))')
+        await page.wait_for_timeout(400)
+        ui = await st("() => { const u = document.querySelector('.crop-ui'); const b = u && u.querySelector('.crop-box').getBoundingClientRect(); return u ? [b.width, b.height, !!document.querySelector('.img-frame.cropping'), document.querySelectorAll('.crop-box .ch').length] : null; }")
+        ok(ui and near(ui[:2], [300, 150]) and ui[2] and ui[3] == 8, 'Crop shows the whole picture with eight black handles', ui)
+        e = await st("() => { const r = document.querySelector('.crop-box .ch.e').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }")
+        await page.mouse.move(*e); await page.mouse.down(); await page.mouse.move(e[0] - 60, e[1] + 30, steps=5); await page.mouse.up()
+        n = await st("() => { const r = document.querySelector('.crop-box .ch.n').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }")
+        await page.mouse.move(*n); await page.mouse.down(); await page.mouse.move(n[0], n[1] + 30, steps=5); await page.mouse.up()
+        await page.keyboard.press('Enter')
+        await page.wait_for_timeout(600)
+        i = await st(INFO)
+        c = i['xf']['c'] if i['xf'] else None
+        ok(c and near([c[0], c[1], c[2], c[3]], [0, 0.2, 0.2, 0], 0.01) and i['w'] == '240px', 'dragging the right and top handles crops 20% off each; Enter finishes; the scale is kept', i)
+        ok(not await st("() => !!document.querySelector('.crop-ui')"), 'the crop frame is gone')
+        await st("() => __Q.undo()"); await page.wait_for_timeout(300)
+        ok((await st(INFO))['xf'] is None, 'undo takes the crop back')
+        await st("() => __Q.redo()"); await page.wait_for_timeout(300)
+        ok(((await st(INFO))['xf'] or {}).get('c') == c, 'redo crops again')
+        # crop a turned picture: the frame turns with it
+        await sel()
+        await st("() => __Q.CMD.rotateRight()"); await page.wait_for_timeout(500)
+        await st("() => __Q.Crop.start(document.querySelector('#editor img'))"); await page.wait_for_timeout(400)
+        tr = await st("() => getComputedStyle(document.querySelector('.crop-ui')).transform")
+        ok(tr.startswith('matrix(0') or 'matrix(6.12' in tr or tr.startswith('matrix(-'), 'the crop frame is turned with the picture', tr)
+        # its own right edge is at the bottom on screen: drag it up
+        s_ = await st("() => { const r = document.querySelector('.crop-box .ch.e').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }")
+        await page.mouse.move(*s_); await page.mouse.down(); await page.mouse.move(s_[0], s_[1] - 60, steps=4); await page.mouse.up()
+        await page.mouse.click(1250, 700)   # a click elsewhere finishes
+        await page.wait_for_timeout(600)
+        i = await st(INFO)
+        ok(i['xf'] and abs(i['xf']['c'][2] - 0.4) < 0.01 and i['xf']['r'] == 90, 'on a turned picture the handle crops the right edge of the picture itself', i['xf'])
+        await sel()
+        await st("() => __Q.CMD.resetPic()"); await page.wait_for_timeout(500)
+
+        print('3. the rotation handle')
+        await sel(); await page.wait_for_timeout(150)
+        hd = await st("() => { const r = document.querySelector('.img-frame .hd.rot').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }")
+        r0 = await st(RECT)
+        cx, cy = r0[0] + r0[2] / 2, r0[1] + r0[3] / 2
+        await page.mouse.move(*hd); await page.mouse.down()
+        import math
+        rad = math.hypot(hd[0] - cx, hd[1] - cy)
+        for a in (10, 20, 30):
+            t = math.radians(a - 90)
+            await page.mouse.move(cx + rad * math.cos(t), cy + rad * math.sin(t), steps=3)
+        mid = await st("() => [document.querySelector('#editor img').style.transform, document.querySelector('.img-frame .sz').textContent]")
+        await page.mouse.up(); await page.wait_for_timeout(600)
+        i = await st(INFO)
+        ok(mid[0].startswith('rotate(') and mid[1].endswith('°'), 'dragging the handle turns the picture as you go and shows the angle', mid)
+        ok(i['xf'] and abs(i['xf']['r'] - 30) < 2 and i['nw'] > 600 and i['orig'], 'let go: turned about 30°, the box grows to fit', i)
+        r1 = await st(RECT)
+        await st("() => __Q.CMD.resetPic()"); await page.wait_for_timeout(500)
+        await sel(); await page.wait_for_timeout(100)
+        hd = await st("() => { const r = document.querySelector('.img-frame .hd.rot').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }")
+        await page.mouse.move(*hd); await page.keyboard.down('Shift'); await page.mouse.down()
+        t = math.radians(38 - 90)
+        await page.mouse.move(cx + rad * math.cos(t), cy + rad * math.sin(t), steps=4)
+        await page.mouse.up(); await page.keyboard.up('Shift'); await page.wait_for_timeout(600)
+        ok(((await st(INFO))['xf'] or {}).get('r') == 45, 'with Shift it turns in 15° steps', (await st(INFO))['xf'])
+        await st("() => __Q.PicEdit.setAngle(0)"); await page.wait_for_timeout(500)
+        ok((await st(INFO))['xf'] is None, 'a turn back to 0° is the original')
+
+        print('4. remove background')
+        await sel()
+        await st("() => __Q.CMD.removeBg()")
+        await page.wait_for_timeout(700)
+        dlg = await st("() => { const d = document.querySelector('.dialog'); return d ? [d.querySelector('h2').textContent, !!d.querySelector('.bg-stage canvas'), d.querySelector('#bgOn').checked, d.querySelectorAll('.chip[data-ink]').length] : null; }")
+        ok(dlg == ['Remove Background', True, True, 3], 'the dialog shows a preview, on, with ink choices', dlg)
+        prev = await st("() => { const c = document.querySelector('.bg-stage canvas'); const g = c.getContext('2d'); return [Array.from(g.getImageData(c.width * 0.9 | 0, c.height * 0.9 | 0, 1, 1).data), c.width > 50]; }")
+        ok(prev[0][3] < 20 and prev[1], 'the preview shows the paper gone', prev)
+        await page.click('.dialog .btn.primary')
+        await page.wait_for_timeout(900)
+        paper = await st(PIX, [0.5, 0.9]); paper2 = await st(PIX, [0.1, 0.6]); inkpx = await st(PIX, [0.2, 0.666])
+        ok(paper[3] < 10 and paper2[3] < 10, 'the paper is transparent, in the light and the shade', [paper, paper2])
+        i = await st(INFO)
+        ok(i['xf']['bg'] == 0.5 and i['orig'], 'kept as an edit of the original', i['xf'])
+        strokes = await st("""() => new Promise(res => { const i = document.querySelector('#editor img'); const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d'); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let ink = 0, blue = 0; for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 200) { ink++; if (d[k + 2] > d[k] + 40) blue++; } res([ink, blue]); }; im.src = i.src; })""")
+        ok(strokes[0] > 3000 and strokes[1] > strokes[0] * 0.5, 'the blue ink stays, opaque and blue', strokes)
+        await st("() => __Q.PicEdit.apply(document.querySelector('#editor img'), Object.assign(__Q.PicEdit.xf(document.querySelector('#editor img')), { ink: '#111111' }))")
+        await page.wait_for_timeout(800)
+        blk = await st("""() => new Promise(res => { const i = document.querySelector('#editor img'); const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d'); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, c.width, c.height).data; let ink = 0, dark = 0; for (let k = 0; k < d.length; k += 4) if (d[k + 3] > 200) { ink++; if (d[k] < 40 && d[k + 1] < 40 && d[k + 2] < 40) dark++; } res([ink, dark]); }; im.src = i.src; })""")
+        ok(blk[0] > 3000 and blk[1] > blk[0] * 0.95, 'Black ink makes it black', blk)
+
+        print('5. in front of / behind the text')
+        await sel()
+        r0 = await st(RECT)
+        await page.click('.rb:visible:has(.cap:text-is("Wrap Text"))')
+        await page.wait_for_timeout(150)
+        labels = await st("() => [...document.querySelectorAll('.pop .mi .lb')].map(e => e.textContent)")
+        ok('Behind Text' in labels and 'In Front of Text' in labels, 'Wrap Text has Behind Text and In Front of Text', labels)
+        await page.locator('.pop .mi', has_text='In Front of Text').click()
+        await page.wait_for_timeout(400)
+        r1 = await st(RECT)
+        info = await st("() => { const i = document.querySelector('#editor img'); const p = i.parentElement; return [i.className, p.firstChild === i, getComputedStyle(i).position, getComputedStyle(p).position, p.textContent.trim() === '' ? p.innerHTML.replace(/<img[^>]*>/, '') : 'text']; }")
+        ok(near(r0[:2], r1[:2]) and info[:4] == ['img-front', True, 'absolute', 'relative'] and info[4] == '<br>', 'it leaves the line but stays where it was; its paragraph keeps a line', [r0, r1, info])
+        # over the text: the picture is on top
+        await page.mouse.move(r1[0] + 60, r1[1] + 40); await page.mouse.down()
+        await page.mouse.move(r1[0] + 160, r1[1] + 120, steps=5); await page.mouse.move(r1[0] + 260, r1[1] + 170, steps=5); await page.mouse.up()
+        await page.wait_for_timeout(400)
+        r2 = await st(RECT)
+        anc = await st("() => document.querySelector('#editor img').parentElement.textContent.slice(0, 6)")
+        ok(near(r2[:2], [r1[0] + 200, r1[1] + 130]) and anc == 'Line 3', 'dragging moves it; the paragraph at its top becomes its anchor', [r1, r2, anc])
+        top = await st(ORDER)
+        ok(top[1] >= 0 and top[0] >= 0 and top[1] < top[0], 'in front of the text it is on top', top)
+        await st("() => __Q.undo()"); await page.wait_for_timeout(300)
+        ok(near((await st(RECT))[:2], r1[:2]), 'undo puts it back')
+        await st("() => __Q.redo()"); await page.wait_for_timeout(300)
+        await sel()
+        await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Shift+ArrowDown')
+        await page.wait_for_timeout(600)
+        r3 = await st(RECT)
+        ok(near(r3[:2], [r2[0] + 4, r2[1] + 10]), 'arrow keys move it (Shift: further)', [r2, r3])
+        # resize from the left edge: the right edge stays
+        await page.wait_for_timeout(200)
+        w_ = await st("() => { const r = document.querySelector('.img-frame .hd.w').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }")
+        await page.mouse.move(*w_); await page.mouse.down(); await page.mouse.move(w_[0] + 40, w_[1], steps=4); await page.mouse.up()
+        await page.wait_for_timeout(300)
+        r4 = await st(RECT)
+        ok(abs((r4[0] + r4[2]) - (r3[0] + r3[2])) < 1.5 and abs(r4[2] - (r3[2] - 40)) < 1.5, 'resizing from the left keeps the right edge', [r3, r4])
+        await sel()
+        await st("() => __Q.CMD.alignCenter()"); await page.wait_for_timeout(300)
+        g = await st("() => { const r = document.querySelector('#editor img').getBoundingClientRect(); const p = document.querySelector('#editor > p').getBoundingClientRect(); const g = __Q.geom(); return [r.x + r.width / 2, p.x + g.cw * __Q.S.zoom / 2]; }")
+        ok(abs(g[0] - g[1]) < 1.5, 'Center puts it in the middle of the column', g)
+        await sel()
+        await st("() => __Q.Images.setWrap('behind')"); await page.wait_for_timeout(300)
+        r5 = await st(RECT)
+        top = await st(ORDER)
+        z = await st("() => getComputedStyle(document.querySelector('#editor img')).zIndex")
+        ok(top[0] >= 0 and top[1] > top[0] and z == '-1', 'behind the text the text is on top', [top, z])
+        # visible on the page (not hidden under the white sheet): a dark ink pixel shows on screen
+        shot = await page.screenshot(clip={'x': r5[0], 'y': r5[1], 'width': r5[2], 'height': r5[3]})
+        im = Image.open(io.BytesIO(shot)).convert('RGB')
+        dark = sum(1 for px in list(im.getdata()) if px[0] < 60 and px[1] < 60 and px[2] < 60)
+        ok(dark > 200, 'behind the text it still shows on the page', dark)
+        layers = await st("async () => { const P = await __Q.collectPaint(); return P.ops.filter(o => o.t === 'img').map(o => o.layer); }")
+        ok(layers == [0.5], 'in the PDF it is drawn under the text', layers)
+        await st("() => __Q.Images.setWrap('front')"); await page.wait_for_timeout(300)
+        layers = await st("async () => { const P = await __Q.collectPaint(); return P.ops.filter(o => o.t === 'img').map(o => o.layer); }")
+        ok(layers == [3], 'in front: drawn over the text', layers)
+
+        print('6. .docx out and back')
+        rf = await st(RECT)
+        b64 = await st("""async () => { const b = await __Q.buildDocx(); const u = new Uint8Array(await b.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }""")
+        zf = zipfile.ZipFile(io.BytesIO(base64.b64decode(b64)))
+        x = zf.read('word/document.xml').decode()
+        m = re.search(r'<wp:anchor[^>]*behindDoc="0"[^>]*>.*?<wp:positionH relativeFrom="column"><wp:posOffset>(-?\d+)</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>(-?\d+)</wp:posOffset></wp:positionV>.*?<wp:wrapNone/>', x)
+        left = await st("() => { const i = document.querySelector('#editor img'); return [parseFloat(i.style.left), parseFloat(i.style.top)]; }")
+        ok(m and abs(int(m.group(1)) / 9525 - left[0]) < 1 and abs(int(m.group(2)) / 9525 - left[1]) < 1, 'saved as a Word picture in front of the text, placed from the column and paragraph', m.groups() if m else None)
+        media = [n for n in zf.namelist() if n.startswith('word/media/')]
+        ok(len(media) == 1 and zf.read(media[0])[:4] == b'\x89PNG', 'the picture inside is the edited one, transparent (PNG)', media)
+        res = await st("""async b64 => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const r = await __Q.readDocxFile(u.buffer); await __Q.openImported(r); await new Promise(r => setTimeout(r, 300)); const i = document.querySelector('#editor img'); const rr = i.getBoundingClientRect(); return [i.className, rr.x, rr.y]; }""", b64)
+        ok(res[0] == 'img-front' and near(res[1:], rf[:2], 2), 'opened again it is in front of the text, in the same place', [res, rf])
+        # Word's own crop and turn: srcRect and rot on a picture
+        x2 = x.replace('<a:stretch><a:fillRect/></a:stretch>', '<a:srcRect l="10000" t="0" r="20000" b="0"/><a:stretch><a:fillRect/></a:stretch>', 1)
+        x2 = re.sub(r'<pic:spPr><a:xfrm>', '<pic:spPr><a:xfrm rot="5400000">', x2, count=1)
+        x2 = re.sub(r'<wp:anchor .*?</wp:anchor>', lambda mm: mm.group(0), x2)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w') as out:
+            for n in zf.namelist(): out.writestr(n, x2 if n == 'word/document.xml' else zf.read(n))
+        res = await st("""async b64 => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const r = await __Q.readDocxFile(u.buffer); await __Q.openImported(r); const i = document.querySelector('#editor img'); return [JSON.parse(i.getAttribute('data-xf') || 'null'), i.hasAttribute('data-orig'), i.naturalWidth, i.naturalHeight]; }""", base64.b64encode(buf.getvalue()).decode())
+        ok(res[0] and near(res[0]['c'], [0.1, 0, 0.2, 0], 0.001) and res[0]['r'] == 90 and res[1] and res[2] < res[3], "Word's crop and turn come in as edits of the original", res)
+
+        print('7. copy and paste inside Folio')
+        await st("h => __Q.openDoc(__Q.newDocModel({ title: 'Pictures 2', html: h }))", html)
+        await page.wait_for_timeout(500)
+        await sel()
+        await st("() => __Q.CMD.rotateRight()"); await page.wait_for_timeout(500)
+        await sel()
+        await st("() => __Q.Images.setWrap('front')"); await page.wait_for_timeout(300)
+        frag = await st("() => { const h = document.querySelector('#editor img').outerHTML; const f = __Q.sanitizeHtml(h, { keepClasses: true }); const i = f.querySelector('img'); return [i.className, i.style.left !== '', !!i.getAttribute('data-xf'), !!i.getAttribute('data-orig')]; }")
+        ok(frag == ['img-front', True, True, True], 'copied inside Folio a picture keeps its edits and its place', frag)
+        ext = await st("() => { const f = __Q.sanitizeHtml(document.querySelector('#editor img').outerHTML, {}); const i = f.querySelector('img'); return [i.className, i.hasAttribute('data-orig')]; }")
+        ok(ext == ['', False], 'from outside, only the picture comes in', ext)
+
+        print('8. signatures')
+        await st("h => __Q.openDoc(__Q.newDocModel({ title: 'Letter', html: h }))", '<p>Sincerely,</p><p><br></p><p>Abdul Karim</p><p>Managing Director</p>')
+        await page.wait_for_timeout(400)
+        await st("() => { const p = document.querySelectorAll('#editor p')[1]; const r = document.createRange(); r.setStart(p, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); document.getElementById('editor').focus(); }")
+        await page.click('#tab-insert')
+        await page.locator('.rb:visible:has(.cap:text-is("Signature"))').click()
+        await page.wait_for_timeout(300)
+        items = await st("() => [...document.querySelectorAll('.pop .mi .lb')].map(e => e.textContent)")
+        ok('Draw a Signature…' in items and 'Add from a Photo or Scan…' in items and await st("() => !!document.querySelector('.pop .sig-empty')"), 'Insert › Signature, empty: Draw, Add from a Photo', items)
+        await page.locator('.pop .mi', has_text='Draw a Signature').click()
+        await page.wait_for_timeout(300)
+        pad = await st("() => { const r = document.querySelector('.sig-pad').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+        ins = page.locator('.dialog .btn.primary')
+        await ins.click(); await page.wait_for_timeout(200)
+        ok(await st("() => !!document.querySelector('.sig-pad')"), 'Insert with nothing drawn keeps the pad open')
+        await page.mouse.move(pad[0] + pad[2] * 0.15, pad[1] + pad[3] * 0.6); await page.mouse.down()
+        for k in range(1, 30):
+            await page.mouse.move(pad[0] + pad[2] * (0.15 + k * 0.022), pad[1] + pad[3] * (0.6 - 0.25 * math.sin(k / 3)), steps=2)
+        await page.mouse.up()
+        await page.mouse.move(pad[0] + pad[2] * 0.5, pad[1] + pad[3] * 0.75); await page.mouse.down(); await page.mouse.move(pad[0] + pad[2] * 0.8, pad[1] + pad[3] * 0.72, steps=6); await page.mouse.up()
+        await page.fill('#sigDrawName', 'My signature')
+        await ins.click()
+        await page.wait_for_timeout(900)
+        sg = await st("() => { const i = document.querySelectorAll('#editor p')[1].querySelector('img'); return i ? [i.alt, parseFloat(i.style.width), i.naturalWidth > 100, i.className] : null; }")
+        ok(sg and sg[0] == 'My signature' and 60 < sg[1] < 260 and sg[2] and sg[3] == '', 'Draw a Signature puts it in the line at the caret', sg)
+        lib = await st("async () => { __Q.Sigs.list = null; const l = await __Q.Sigs.all(); return l.map(s => [s.name, s.wrap, s.url.slice(0, 22)]); }")
+        ok(lib == [['My signature', 'inline', 'data:image/png;base64,']], 'and keeps it in your signatures (saved with your account)', lib)
+        tr = await st("""() => new Promise(res => { const i = document.querySelectorAll('#editor p')[1].querySelector('img'); const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d'); g.drawImage(im, 0, 0); res(Array.from(g.getImageData(1, 1, 1, 1).data)); }; im.src = i.src; })""")
+        ok(tr[3] == 0, 'drawn on a transparent background, trimmed', tr)
+        # a stamp from a photo, in front of the text
+        stamp = await st("""() => { const c = document.createElement('canvas'); c.width = 500; c.height = 500; const g = c.getContext('2d'); g.fillStyle = 'rgb(232,228,220)'; g.fillRect(0, 0, 500, 500); g.strokeStyle = 'rgb(110,40,150)'; g.lineWidth = 14; g.beginPath(); g.arc(250, 250, 150, 0, Math.PI * 2); g.stroke(); g.lineWidth = 6; g.beginPath(); g.arc(250, 250, 110, 0, Math.PI * 2); g.stroke(); return c.toDataURL('image/jpeg', 0.9).split(',')[1]; }""")
+        path = os.path.join(tempfile.gettempdir(), 'stamp-test.jpg')
+        open(path, 'wb').write(base64.b64decode(stamp))
+        await st("() => { const p = document.querySelectorAll('#editor p')[2]; const r = document.createRange(); r.setStart(p.firstChild, 5); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); document.getElementById('editor').focus(); }")
+        await page.click('#tab-insert')
+        await page.locator('.rb:visible:has(.cap:text-is("Signature"))').click()
+        await page.wait_for_timeout(300)
+        async with page.expect_file_chooser() as fc:
+            await page.locator('.pop .mi', has_text='Add from a Photo').click()
+        await (await fc.value).set_files(path)
+        await page.wait_for_timeout(1200)
+        await page.fill('#sigName', 'Office seal')
+        await page.select_option('#sigKind', 'front')
+        await page.click('.dialog .btn.primary')
+        await page.wait_for_timeout(1500)
+        seal = await st("() => { const i = [...document.querySelectorAll('#editor img')].find(i => i.alt === 'Office seal'); if (!i) return null; const r = i.getBoundingClientRect(); return [i.className, Math.round(parseFloat(i.style.width)), Math.abs(i.naturalWidth - i.naturalHeight) < 6, i.naturalWidth < 400]; }")
+        ok(seal and seal[0] == 'img-front' and seal[1] == 125 and seal[2] and seal[3], 'Add from a Photo: the seal goes in front of the text at the caret, trimmed to the ring', seal)
+        clear = await st("""() => new Promise(res => { const i = [...document.querySelectorAll('#editor img')].find(i => i.alt === 'Office seal'); const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d'); g.drawImage(im, 0, 0); const mid = g.getImageData(c.width / 2 | 0, c.height / 2 | 0, 1, 1).data; const ring = g.getImageData(c.width / 2 | 0, 0, 1, 50).data; let a = 0; for (let k = 3; k < ring.length; k += 4) a = Math.max(a, ring[k]); res([mid[3], a]); }; im.src = i.src; })""")
+        ok(clear[0] < 10 and clear[1] > 200, 'its paper is transparent, its ring is not', clear)
+        # the menu now lists both, with pictures; one click puts one in
+        await page.click('#tab-insert')
+        await page.locator('.rb:visible:has(.cap:text-is("Signature"))').click()
+        await page.wait_for_timeout(300)
+        names = await st("() => [...document.querySelectorAll('.pop .sig-mi')].map(b => [b.textContent, !!b.querySelector('.sig-thumb img')])")
+        ok(names == [['My signature', True], ['Office seal', True]], 'Insert › Signature lists them with pictures', names)
+        n0 = await st("() => document.querySelectorAll('#editor img').length")
+        await page.locator('.pop .sig-mi', has_text='My signature').click()
+        await page.wait_for_timeout(500)
+        ok(await st("() => document.querySelectorAll('#editor img').length") == n0 + 1, 'one click puts it in')
+        # save a picture from the document
+        await st("() => __Q.Images.select([...document.querySelectorAll('#editor img')].find(i => i.alt === 'Office seal'))")
+        await st("() => __Q.CMD.saveSig()")
+        await page.wait_for_timeout(200)
+        await page.fill('#ssName', 'Seal copy')
+        await page.click('.dialog .btn.primary')
+        await page.wait_for_timeout(600)
+        lib = await st("async () => { __Q.Sigs.list = null; return (await __Q.Sigs.all()).map(s => [s.name, s.wrap, s.w]); }")
+        ok(len(lib) == 3 and lib[2][0] == 'Seal copy' and lib[2][1] == 'front' and lib[2][2] == 125, 'Save as Signature keeps a picture with its size and place', lib)
+        # manage: rename, delete, undo
+        await page.click('#tab-insert')
+        await page.locator('.rb:visible:has(.cap:text-is("Signature"))').click()
+        await page.wait_for_timeout(300)
+        await page.locator('.pop .mi', has_text='Manage Signatures').click()
+        await page.wait_for_timeout(300)
+        await page.locator('.sig-row .input').nth(2).fill('Seal (copy)')
+        await page.locator('.sig-row .input').nth(2).press('Tab')
+        await page.wait_for_timeout(300)
+        await page.locator('.sig-row .tb-btn').nth(0).click()
+        await page.wait_for_timeout(400)
+        rows = await st("() => document.querySelectorAll('.sig-row').length")
+        ok(rows == 2, 'Delete takes one away', rows)
+        await page.locator('.toast button', has_text='Undo').click()
+        await page.wait_for_timeout(600)
+        lib = await st("async () => { __Q.Sigs.list = null; return (await __Q.Sigs.all()).map(s => s.name); }")
+        ok(lib == ['My signature', 'Office seal', 'Seal (copy)'], 'renamed; Undo brings the deleted one back', lib)
+        await page.keyboard.press('Escape')
+        store = await st("() => Object.keys(window.__mockStore ? Object.fromEntries(window.__mockStore) : {}).filter(k => k.includes('/sigs/')).length")
+        ok(store >= 6, 'kept in your private account storage (data/users/…/profile/sigs)', store)
+
+        print('9. at 150% zoom')
+        await st("h => __Q.openDoc(__Q.newDocModel({ title: 'Zoom', html: h }))", html)
+        await page.wait_for_timeout(400)
+        await st("() => __Q.setZoom(1.5)"); await page.wait_for_timeout(400)
+        await st("() => { document.querySelector('#editor img').scrollIntoView({ block: 'center' }); }"); await page.wait_for_timeout(200)
+        await sel()
+        await st("() => __Q.Images.setWrap('front')"); await page.wait_for_timeout(300)
+        z0 = await st(RECT)
+        await page.mouse.move(z0[0] + 50, z0[1] + 40); await page.mouse.down(); await page.mouse.move(z0[0] + 110, z0[1] + 70, steps=6); await page.mouse.up()
+        await page.wait_for_timeout(300)
+        z1 = await st(RECT)
+        ok(near(z1[:2], [z0[0] + 60, z0[1] + 30]), 'at 150% a drag moves it with the pointer', [z0, z1])
+        await st("() => __Q.Crop.start(document.querySelector('#editor img'))"); await page.wait_for_timeout(400)
+        cb = await st("() => { const r = document.querySelector('.crop-box').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }")
+        ok(near(cb, z1, 1.5), 'the crop frame sits exactly on the picture', [cb, z1])
+        await page.keyboard.press('Escape'); await page.wait_for_timeout(300)
+        await st("() => __Q.setZoom(1)"); await page.wait_for_timeout(300)
+
+        print('10. read-only')
+        await st("() => { __Q.S.readOnly = true; }")
+        await st("() => __Q.Images.select(document.querySelector('#editor img'))")
+        before = await st(INFO)
+        await st("() => __Q.CMD.rotateRight()"); await page.wait_for_timeout(400)
+        ok((await st(INFO)) == before and await st("() => document.querySelector('.img-frame').classList.contains('ro')"), 'a read-only document: nothing turns, no handles')
+        await st("() => { __Q.S.readOnly = false; }")
+        ok(not [e for e in errors if e[0] == 'pageerror'], 'no page errors', errors)
+        await b.close()
+    print('\nFAILED: ' + ', '.join(fails) if fails else '\nall passed')
+
+asyncio.run(main())

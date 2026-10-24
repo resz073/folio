@@ -1,0 +1,295 @@
+"""Footnotes and endnotes: References › Insert Footnote at the caret (mark, the note opens on the
+page, typing, Esc back to the mark, undo); numbering in order (a note put before another renumbers
+both); the notes sit at the bottom of their mark's page above the margin, the text never under
+them, and a line whose note doesn't fit goes to the next page with it; endnotes after the text;
+number formats (Bangla, roman) and Start at; a click on a note opens it, a click in the text
+leaves it, double-clicks between mark and note; deleting a mark (and undo); convert; copy and cut
+with paste; the saved copy keeps only notes with a mark; the account keeps them in parts; Word
+files out (parts, styles, settings, custom Bangla marks) and back, and through LibreOffice; the
+vector PDF; the web page, Markdown and plain text; with a footer; read-only; in a header."""
+import asyncio, sys, json, base64, io, zipfile, re, subprocess, os, tempfile
+sys.path.insert(0, 'tests')
+from harness import *
+
+fails = []
+def ok(cond, what, got=None):
+    print(('  ok   ' if cond else '  FAIL ') + what + ('' if cond or got is None else '  -> ' + json.dumps(got, ensure_ascii=False)[:700]))
+    if not cond: fails.append(what)
+
+PARA = 'The office will remain closed on Sunday for the national holiday. All staff are requested to note this and plan their work accordingly. '
+HTML = '<p>Ref: ABC/2026/112</p><p>Date: 19 October 2026</p>' + ''.join(f'<p>{i + 1}. ' + PARA * 3 + '</p>' for i in range(22))
+GET_DOCX = """async () => { const blob = await __Q.buildDocx(); const buf = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000)); return btoa(s); }"""
+OPEN_DOCX = """async (b64) => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const r = await __Q.readDocxFile(u.buffer); r.title = 'Imported'; await __Q.openImported(r); return true; }"""
+# caret at the end of paragraph k (0-based, top-level)
+CARET = """k => { const p = document.querySelectorAll('#editor > p')[k]; const r = document.createRange(); r.selectNodeContents(p); r.collapse(false); getSelection().removeAllRanges(); getSelection().addRange(r); document.getElementById('editor').focus(); }"""
+# where things are: each ref's page and number, each note's page
+STATE = """() => { const g = __Q.geom(), pitch = g.h + __Q.GAP; const top = el => { let y = 0, n = el; while (n && n.id !== 'editor') { y += n.offsetTop; n = n.offsetParent; } return y; };
+  return { refs: [...document.querySelectorAll('#editor sup.fn')].map(s => [s.textContent, Math.floor(top(s) / pitch), s.classList.contains('en') ? 'end' : 'foot']),
+           notes: [...document.querySelectorAll('#sheets .sheet')].map((sh, i) => [...sh.querySelectorAll('.fnote, .enote')].map(n => { const c = n.cloneNode(true), num = c.querySelector('sup.fnn'); const m = num ? num.textContent : ''; if (num) num.remove(); return (n.classList.contains('enote') ? 'E:' : 'F:') + m + ' ' + c.textContent.replace(/\\s+/g, ' ').trim(); })),
+           pages: __Q.S.pages }; }"""
+# no line of text on a page runs into its footnotes
+OVERLAP = """() => { const out = []; const sheets = [...document.querySelectorAll('#sheets .sheet')];
+  sheets.forEach((sh, i) => { const a = sh.querySelector('.fn-area'); if (!a) return; const top = a.getBoundingClientRect().top; const sr = sh.getBoundingClientRect();
+    const rr = document.createRange(); const w = document.createTreeWalker(document.getElementById('editor'), NodeFilter.SHOW_TEXT);
+    for (let t = w.nextNode(); t; t = w.nextNode()) { if (!t.data.replace(/[\\s\\u2060\\u200B]/g, '') || t.parentNode.closest('.pg-line')) continue; rr.selectNodeContents(t); for (const r of rr.getClientRects()) if (r.top >= sr.top && r.top < sr.bottom && r.bottom > top + 0.5 && r.left >= sr.left && r.right <= sr.right) out.push([i, Math.round(r.bottom - top)]); } });
+  return out; }"""
+
+def pdf_pages_text(path):
+    n = int(re.search(r'Pages:\s+(\d+)', subprocess.run(['pdfinfo', path], capture_output=True, text=True).stdout).group(1))
+    return [subprocess.run(['pdftotext', '-f', str(i), '-l', str(i), '-layout', path, '-'], capture_output=True, text=True).stdout for i in range(1, n + 1)]
+
+async def main():
+    async with async_playwright() as p:
+        b, page, errors = await new_page(p, width=1366, height=900, mock_caps=True, gfonts=True)
+        await load(page)
+        st = lambda js, *a: page.evaluate(js, *a)
+        await st("h => __Q.openDoc(__Q.newDocModel({ title: 'Office notice', html: h }))", HTML)
+        await page.wait_for_timeout(500)
+
+        print('1. Insert Footnote')
+        await st(CARET, 4)
+        idx0 = await st("() => __Q.Hist.idx")
+        await st("() => __Q.UI.selectTab('references')")
+        await page.locator('.rb:visible:has(.cap:text-is("Insert Footnote"))').first.click()
+        await page.wait_for_timeout(400)
+        r = await st("() => ({ story: __Q.Story.cur && [__Q.Story.cur.type, __Q.Story.cur.kind], ref: [...document.querySelectorAll('#editor sup.fn')].map(s => [s.textContent, s.getAttribute('contenteditable')]), live: __Q.Story.cur && __Q.Story.cur.el.innerText, caret: (() => { const s = getSelection(); return !!(s.rangeCount && __Q.Story.cur && __Q.Story.cur.el.contains(s.anchorNode)); })(), font: getComputedStyle(__Q.Story.cur.el).fontSize })")
+        ok(r['story'] == ['note', 'foot'] and r['ref'] == [['1', 'false']], 'a mark "1" goes in at the caret and its note opens on the page', r)
+        ok(r['caret'] and r['font'] == '13.3333px', 'the caret is in the note, which is 10 pt (Word\'s Footnote Text)', r)
+        await page.keyboard.type('Government holiday notice no. 4, dated 1 October 2026.')
+        await page.wait_for_timeout(250)
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(300)
+        r = await st("() => { const s = getSelection(); const ref = document.querySelector('#editor sup.fn'); return { story: !!__Q.Story.cur, after: s.rangeCount && s.anchorNode.childNodes ? s.anchorNode.childNodes[s.anchorOffset - 1] === ref : false, notes: Object.values(__Q.S.doc.footnotes).map(n => [n.kind, n.html]), idx: __Q.Hist.idx }; }")
+        ok(not r['story'] and r['after'], 'Esc goes back to the text, the caret just after the mark', r)
+        ok(r['notes'] == [['foot', '<p>Government holiday notice no. 4, dated 1 October 2026.</p>']], 'the note keeps its text (without its number)', r['notes'])
+        ok(r['idx'] == idx0 + 2, 'two undo steps: the mark, then the note\'s text', [idx0, r['idx']])
+        s = await st(STATE)
+        ok(s['refs'][0][1] == 0 and s['notes'][0] == ['F:1 Government holiday notice no. 4, dated 1 October 2026.'], 'the note is at the bottom of page 1, numbered like its mark', s)
+        ok(await st(OVERLAP) == [], 'no line of text runs into the footnote area')
+        r = await st("() => { const a = document.querySelector('#sheets .fn-area'), sh = a.closest('.sheet'); return [Math.round(sh.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom), Math.round(__Q.geom().mb * __Q.S.zoom)]; }")
+        ok(abs(r[0] - r[1]) <= 1, 'the footnotes end at the bottom margin', r)
+        await st("() => __Q.undo()")
+        await page.wait_for_timeout(250)
+        ok(await st("() => Object.values(__Q.S.doc.footnotes)[0].html") == '<p><br></p>', 'Undo takes the note\'s text back')
+        await st("() => __Q.undo()")
+        await page.wait_for_timeout(250)
+        ok(await st("() => document.querySelectorAll('#editor sup.fn').length") == 0 and not (await st(STATE))['notes'][0], 'Undo again removes the mark and its note')
+        await st("() => { __Q.redo(); __Q.redo(); }")
+        await page.wait_for_timeout(300)
+        s = await st(STATE)
+        ok(s['notes'][0] == ['F:1 Government holiday notice no. 4, dated 1 October 2026.'], 'Redo brings both back', s['notes'][0])
+
+        print('2. Numbering, a second note before the first, Ctrl+Alt+F')
+        await st(CARET, 2)
+        await page.keyboard.press('Control+Alt+f')
+        await page.wait_for_timeout(300)
+        await page.keyboard.type('Memo of 3 October.')
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(300)
+        s = await st(STATE)
+        ok([x[0] for x in s['refs']] == ['1', '2'] and s['notes'][0] == ['F:1 Memo of 3 October.', 'F:2 Government holiday notice no. 4, dated 1 October 2026.'], 'the new note is 1, the other becomes 2, on the page as in the text', s)
+
+        print('3. A line whose note doesn\'t fit goes to the next page with it')
+        k = await st("() => { const g = __Q.geom(), pitch = g.h + __Q.GAP; const ps = [...document.querySelectorAll('#editor > p')]; let best = -1; ps.forEach((p, i) => { const r = p.getBoundingClientRect(), e = document.getElementById('editor').getBoundingClientRect(); const bot = (r.bottom - e.top) / __Q.S.zoom; if (bot < pitch - 10) best = i; }); return best; }")
+        await st(CARET, k)
+        await st("() => __Q.Notes.insert('foot')")
+        await page.keyboard.type('A long note: ' + 'the circular sets out the arrangements for the holiday, the offices that stay open, and who to call. ' * 4)
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(400)
+        s = await st(STATE)
+        last = [x for x in s['refs'] if x[0] == '3'][0]
+        ok(last[1] == 1 and any('A long note' in n for n in s['notes'][1]) and not any('A long note' in n for n in s['notes'][0]), 'the mark at the end of page 1\'s last paragraph moved to page 2, with its note', [k, s])
+        ok(await st(OVERLAP) == [], 'still no text under the notes on any page', await st(OVERLAP))
+
+        print('4. Click a note; click the text; double-clicks')
+        await st("() => document.querySelector('#sheets .fnote').scrollIntoView({ block: 'center' })")
+        await page.wait_for_timeout(200)
+        pt = await st("() => { const r = document.querySelector('#sheets .fnote').getBoundingClientRect(); return { x: r.left + 60, y: r.top + r.height / 2 }; }")
+        await page.mouse.click(pt['x'], pt['y'])
+        await page.wait_for_timeout(250)
+        r = await st("() => ({ story: __Q.Story.cur && __Q.Story.cur.type, id: __Q.Story.cur && __Q.Story.cur.id, txt: __Q.Story.cur && __Q.Story.cur.el.innerText, caret: (() => { const s = getSelection(); return !!(s.rangeCount && __Q.Story.cur && __Q.Story.cur.el.contains(s.anchorNode)); })() })")
+        ok(r['story'] == 'note' and 'Memo of 3 October' in r['txt'] and r['caret'], 'a click on a note opens it, with the caret where it was clicked', r)
+        await page.keyboard.press('End')
+        await page.keyboard.type(' (copy to all sections)')
+        pt2 = await st("() => { const r = document.querySelectorAll('#editor > p')[1].getBoundingClientRect(); return { x: r.left + 30, y: r.top + 5 }; }")
+        await st("() => document.querySelectorAll('#editor > p')[1].scrollIntoView({ block: 'center' })")
+        await page.wait_for_timeout(150)
+        pt2 = await st("() => { const r = document.querySelectorAll('#editor > p')[1].getBoundingClientRect(); return { x: r.left + 30, y: r.top + 5 }; }")
+        await page.mouse.click(pt2['x'], pt2['y'])
+        await page.wait_for_timeout(250)
+        r = await st("() => ({ story: !!__Q.Story.cur, caret: (() => { const s = getSelection(); return !!(s.rangeCount && document.querySelectorAll('#editor > p')[1].contains(s.anchorNode)); })(), html: Object.values(__Q.S.doc.footnotes).map(n => n.html) })")
+        ok(not r['story'] and r['caret'] and any('(copy to all sections)' in h for h in r['html']), 'a click in the text leaves the note (kept) and puts the caret there', r)
+        await st("() => document.querySelector('#editor sup.fn').scrollIntoView({ block: 'center' })")
+        await page.wait_for_timeout(150)
+        pt = await st("() => { const r = document.querySelector('#editor sup.fn').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }")
+        await page.mouse.dblclick(pt['x'], pt['y'])
+        await page.wait_for_timeout(250)
+        r = await st("() => __Q.Story.cur && [__Q.Story.cur.type, __Q.Notes.mark(__Q.Story.cur.id)]")
+        ok(r == ['note', '1'], 'a double-click on a mark opens its note', r)
+        pt = await st("() => { const r = __Q.Story.cur.el.querySelector('sup.fnn').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }")
+        await page.mouse.dblclick(pt['x'], pt['y'])
+        await page.wait_for_timeout(250)
+        ok(not await st("() => !!__Q.Story.cur"), 'a double-click on the note\'s number goes back to its mark')
+
+        print('5. Endnotes, formats, Start at')
+        n_par = await st("() => document.querySelectorAll('#editor > p').length")
+        await st(CARET, n_par - 1)
+        await page.keyboard.press('Control+Alt+d')
+        await page.keyboard.type('Approved by the Board on 12 October 2026.')
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(400)
+        s = await st(STATE)
+        endref = [x for x in s['refs'] if x[2] == 'end']
+        ok(endref == [['i', endref[0][1], 'end']] and any('E:i Approved by the Board' in n for n in s['notes'][s['pages'] - 1]), 'an endnote is numbered i and follows the text on the last page', s)
+        r = await st("() => { const sh = [...document.querySelectorAll('#sheets .sheet')]; const a = document.querySelector('#sheets .en-area'); const ps = document.querySelectorAll('#editor > p'); const last = ps[ps.length - 1].getBoundingClientRect(); return [a.getBoundingClientRect().top - last.bottom]; }")
+        ok(r[0] >= 0 and r[0] < 40 or (await st("() => __Q.Notes.enPlaces[0].y")) < 200, 'right after the last line (or at the top of a new page)', r)
+        await st("() => __Q.Notes.dialog()")
+        await page.wait_for_timeout(200)
+        sels = page.locator('.dialog select')
+        await sels.nth(0).select_option('bn')
+        await sels.nth(1).select_option('I')
+        await page.locator('.dialog input[type=number]').nth(1).fill('5')
+        await page.click('.dialog footer .btn.primary')
+        await page.wait_for_timeout(400)
+        s = await st(STATE)
+        ok([x[0] for x in s['refs']] == ['১', '২', '৩', 'V'], 'Bangla digits for footnotes; endnotes I, II… starting at V', [x[0] for x in s['refs']])
+        ok(s['notes'][0][0].startswith('F:১ Memo'), 'the notes show the same numbers', s['notes'][0])
+        await st("() => __Q.undo()")
+        await page.wait_for_timeout(250)
+        ok([x[0] for x in (await st(STATE))['refs']] == ['1', '2', '3', 'i'], 'Undo puts the formats back')
+        await st("() => __Q.redo()")
+
+        print('6. Delete a mark, convert, copy and paste')
+        await st("() => { const ref = document.querySelectorAll('#editor sup.fn')[0]; const r = document.createRange(); r.selectNode(ref); getSelection().removeAllRanges(); getSelection().addRange(r); }")
+        await page.keyboard.press('Delete')
+        await page.wait_for_timeout(300)
+        s = await st(STATE)
+        ok([x[0] for x in s['refs']] == ['১', '২', 'V'] and not any('Memo' in n for pg in s['notes'] for n in pg), 'deleting a mark removes its note from the page; the others are renumbered', s)
+        ok(await st("() => Object.values(__Q.S.doc.footnotes).some(n => /Memo/.test(n.html))"), 'the note stays in the open document (undo can bring it back)')
+        snap = await st("() => Object.values(__Q.snapshotDoc().footnotes).map(n => n.html)")
+        ok(not any('Memo' in h for h in snap) and len(snap) == 3, 'the saved copy leaves it out', snap)
+        await st("() => __Q.undo()")
+        await page.wait_for_timeout(300)
+        s = await st(STATE)
+        ok([x[0] for x in s['refs']] == ['১', '২', '৩', 'V'] and 'Memo' in s['notes'][0][0], 'Undo brings the mark and its note back', s)
+        # convert the first footnote to an endnote from its right-click menu
+        pt = await st("() => { const r = document.querySelector('#editor sup.fn').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }")
+        await page.mouse.click(pt['x'], pt['y'], button='right')
+        await page.wait_for_timeout(200)
+        items = await st("() => [...document.querySelectorAll('.pop.ctx .mi')].map(m => m.textContent.trim())")
+        ok(any(i.startswith('Go to Footnote') for i in items) and any(i.startswith('Convert to Endnote') for i in items) and any(i.startswith('Delete Footnote') for i in items), 'its menu: Go to Footnote, Convert to Endnote, Delete Footnote', items)
+        await page.locator('.pop.ctx .mi', has_text='Convert to Endnote').click()
+        await page.wait_for_timeout(300)
+        s = await st(STATE)
+        ok([x[0] + x[2][0] for x in s['refs']] == ['Vе'.replace('е', 'e'), '১f', '২f', 'VIe'], 'converted: it is an endnote now, numbered with the endnotes', [x[0] + x[2][0] for x in s['refs']])
+        await st("() => __Q.undo()")
+        await page.wait_for_timeout(250)
+        # copy a paragraph with a mark and paste it at the end: a second note with the same text
+        await st("() => { const p = document.querySelector('#editor sup.fn').closest('p'); const r = document.createRange(); r.selectNodeContents(p); getSelection().removeAllRanges(); getSelection().addRange(r); }")
+        await page.keyboard.press('Control+c')
+        await st("() => { const ps = document.querySelectorAll('#editor > p'); const p = ps[ps.length - 1]; const n = document.createElement('p'); n.innerHTML = '<br>'; p.after(n); const r = document.createRange(); r.setStart(n, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }")
+        await page.keyboard.press('Control+v')
+        await page.wait_for_timeout(400)
+        r = await st("() => { const refs = [...document.querySelectorAll('#editor sup.fn')]; const ids = refs.map(s => s.dataset.fn); return { n: refs.length, uniq: new Set(ids).size, memo: Object.entries(__Q.S.doc.footnotes).filter(([k, v]) => ids.includes(k) && /Memo/.test(v.html)).length, marks: refs.map(s => s.textContent) }; }")
+        ok(r['n'] == 5 and r['uniq'] == 5 and r['memo'] == 2, 'a copied mark brings a copy of its note', r)
+
+        print('7. With a footer; read-only; in a header')
+        await st("() => __Q.HF.pageNumbers('footer', 'center')")
+        await page.wait_for_timeout(300)
+        r = await st("() => { const sh = document.querySelector('#sheets .sheet'); const a = sh.querySelector('.fn-area'), f = sh.querySelector('.hfx.ftr'); return f && a ? [Math.round(f.getBoundingClientRect().top - a.getBoundingClientRect().bottom)] : null; }")
+        ok(r and r[0] >= 0, 'the footnotes stay above the footer', r)
+        await st("() => { __Q.S.readOnly = true; }")
+        n0 = await st("() => document.querySelectorAll('#editor sup.fn').length")
+        await st("() => __Q.Notes.insert('foot')")
+        ok(await st("() => document.querySelectorAll('#editor sup.fn').length") == n0, 'a read-only document gets no new note')
+        await st("() => { __Q.S.readOnly = false; }")
+        await st("() => __Q.HF.edit('header', 0)")
+        await page.keyboard.press('Control+Alt+f')
+        await page.wait_for_timeout(200)
+        ok(await st("() => document.querySelectorAll('#editor sup.fn').length") == n0 and await st("() => [...document.querySelectorAll('.toast')].some(t => /can’t go in a header/.test(t.textContent))"), 'a footnote can\'t go in a header (said so)')
+        await page.keyboard.press('Escape')
+        await page.wait_for_timeout(200)
+
+        print('8. The Word file')
+        await st("() => { for (const t of document.querySelectorAll('.toast')) t.remove(); }")
+        b64 = await st(GET_DOCX)
+        open('shots/fn1.docx', 'wb').write(base64.b64decode(b64))
+        z = zipfile.ZipFile(io.BytesIO(base64.b64decode(b64)))
+        doc = z.read('word/document.xml').decode()
+        fx = z.read('word/footnotes.xml').decode()
+        ex = z.read('word/endnotes.xml').decode()
+        refs = re.findall(r'<w:(footnote|endnote)Reference (w:customMarkFollows="1" )?w:id="(\d+)"/>(?:<w:t>([^<]*)</w:t>)?', doc)
+        ok([(k, i, m) for k, c, i, m in refs] == [('footnote', '1', '১'), ('footnote', '2', '২'), ('footnote', '3', '৩'), ('endnote', '1', ''), ('footnote', '4', '৪')], 'the marks: footnotes numbered in order, Bangla digits as custom marks; the endnote', refs)
+        ok('w:type="separator" w:id="-1"' in fx and 'w:type="continuationSeparator" w:id="0"' in fx and fx.count('<w:footnote w:id="') == 4 and 'Memo of 3 October' in fx and '<w:pStyle w:val="FootnoteText"/>' in fx, 'footnotes.xml: separators, the four notes in Footnote Text', fx[:400])
+        ok('<w:rStyle w:val="FootnoteReference"/></w:rPr><w:t>১</w:t>' in fx, 'each note starts with its (custom) number', re.findall(r'<w:footnote w:id="1">.{0,300}', fx))
+        ok('<w:endnoteRef/>' in ex and 'Approved by the Board' in ex, 'endnotes.xml with Word\'s own number', ex[:300])
+        sect = re.findall(r'<w:sectPr>.*?</w:sectPr>', doc)[-1]
+        ok('<w:footnotePr><w:numFmt w:val="decimal"/></w:footnotePr>' in sect and '<w:endnotePr><w:numFmt w:val="upperRoman"/><w:numStart w:val="5"/></w:endnotePr>' in sect, 'the section has the formats and Start at', sect[:500])
+        sett = z.read('word/settings.xml').decode()
+        ok('<w:footnotePr><w:footnote w:id="-1"/>' in sett and '<w:endnotePr><w:endnote w:id="-1"/>' in sett and sett.index('<w:footnotePr>') < sett.index('<w:compat>'), 'settings list the separators before compat')
+        sty = z.read('word/styles.xml').decode()
+        ok(all(x in sty for x in ['w:styleId="FootnoteText"', 'w:styleId="FootnoteReference"', 'w:styleId="EndnoteText"', 'w:styleId="EndnoteReference"']), 'Word\'s note styles are defined')
+        ct = z.read('[Content_Types].xml').decode()
+        ok('/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"' in ct and 'endnotes+xml' in ct, 'content types for both parts')
+        await st(OPEN_DOCX, b64)
+        await page.wait_for_timeout(800)
+        s = await st(STATE)
+        ok([x[0] for x in s['refs']] == ['১', '২', '৩', 'V', '৪'] and 'Memo of 3 October' in s['notes'][0][0], 'opened again: the same marks, formats and notes', s)
+        r = await st("() => Object.values(__Q.S.doc.footnotes).map(n => n.html)")
+        ok(all(not h.startswith('<p> ') and 'fnn' not in h for h in r), 'the notes\' text without Word\'s number and space', r)
+        # LibreOffice reads our file, and writes its own back
+        with tempfile.TemporaryDirectory() as td:
+            src = os.path.join(td, 'fn.docx'); open(src, 'wb').write(base64.b64decode(b64))
+            subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', '--outdir', td, src], capture_output=True, timeout=120)
+            txt = pdf_pages_text(os.path.join(td, 'fn.pdf')) if os.path.exists(os.path.join(td, 'fn.pdf')) else []
+            ok(txt and 'Memo of 3 October' in txt[0] and 'Government holiday notice' in txt[0], 'LibreOffice: page 1 has its two footnotes', txt[0][-600:] if txt else None)
+            ok(txt and 'Approved by the Board' in txt[-1], 'LibreOffice: the endnote on the last page', txt[-1][-300:] if txt else None)
+            os.makedirs(os.path.join(td, 'lo'))
+            subprocess.run(['soffice', '--headless', '--convert-to', 'docx:MS Word 2007 XML', '--outdir', os.path.join(td, 'lo'), src], capture_output=True, timeout=120)
+            lo = os.path.join(td, 'lo', 'fn.docx')
+            if os.path.exists(lo):
+                await st(OPEN_DOCX, base64.b64encode(open(lo, 'rb').read()).decode())
+                await page.wait_for_timeout(800)
+                s = await st(STATE)
+                ok(len([x for x in s['refs'] if x[2] == 'foot']) == 4 and len([x for x in s['refs'] if x[2] == 'end']) == 1 and any('Memo of 3 October' in n for pg in s['notes'] for n in pg) and any('Approved by the Board' in n for pg in s['notes'] for n in pg), 'LibreOffice\'s own .docx: the notes come in', s)
+            else: ok(False, 'LibreOffice wrote a .docx')
+
+        print('9. PDF, web page, Markdown, plain text')
+        await st(OPEN_DOCX, b64)
+        await page.wait_for_timeout(800)
+        r = await st("""async () => { await document.fonts.ready; const blob = await __Q.buildVectorPdf({ title: 'Notes' }); const u = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }""")
+        open('shots/fn1.pdf', 'wb').write(base64.b64decode(r))
+        txt = pdf_pages_text('shots/fn1.pdf')
+        ok('Memo of 3 October' in txt[0] and 'Government holiday notice' in txt[0], 'PDF: page 1 has its footnotes', txt[0][-500:])
+        ok('Approved by the Board' in txt[-1], 'PDF: the endnote on the last page', txt[-1][-300:])
+        html = await st("() => __Q.toStandaloneHtml()")
+        ok(re.search(r'<sup class="fn[^"]*"[^>]*><a href="#n1" id="r-n1">১</a></sup>', html) and 'id="n1"' in html and 'Memo of 3 October' in html and 'class="en-area doc"' in html, 'the web page: marks link to the notes after the text', re.findall(r'<sup class="fn[^>]*>.{0,60}', html)[:2])
+        md = await st("() => __Q.toMarkdown()")
+        ok('[^fn1]' in md and re.search(r'^\[\^fn1\]: Memo of 3 October', md, re.M) and re.search(r'^\[\^en1\]: Approved by the Board', md, re.M), 'Markdown: [^fn1] marks and their notes at the end', md[-400:])
+        tx = await st("() => __Q.toPlainText()")
+        ok('[১]' in tx and re.search(r'^\[১\] Memo of 3 October', tx, re.M) and re.search(r'^\[V\] Approved by the Board', tx, re.M), 'plain text: [১] marks and the notes at the end', tx[-400:])
+
+        print('10. The account; phone width')
+        r = await st("""async () => { await __Q.Saver.flush(); __Q.Saver.mark(); await __Q.Saver.flush(); const id = __Q.S.doc.id; const key = [...window.__mockStore.keys()].find(k => k.endsWith('/docs/' + id)); const meta = window.__mockStore.get(key); const back = await __Q.CloudStore.load(id); return { fn: (meta.fnChunks || []).length, inBody: /Memo of 3 October/.test(meta.body), back: Object.values(back.footnotes || {}).map(n => n.html).join(' ') }; }""")
+        ok(r['fn'] >= 1 and not r['inBody'] and 'Memo of 3 October' in r['back'], 'the notes are saved in parts of their own and come back', r)
+        b2, page2, errors2 = await new_page(p, width=400, height=860, mock_caps=True, gfonts=True)
+        await load(page2)
+        await page2.evaluate("h => __Q.openDoc(__Q.newDocModel({ title: 'Office notice', html: h }))", HTML)
+        await page2.wait_for_timeout(300)
+        await page2.evaluate(CARET, 3)
+        await page2.evaluate("() => __Q.Notes.insert('foot')")
+        await page2.keyboard.type('A note on a phone.')
+        await page2.wait_for_timeout(300)
+        r = await page2.evaluate("() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, story: __Q.Story.cur && __Q.Story.cur.type })")
+        ok(r['sw'] <= r['cw'] and r['story'] == 'note', 'on a phone the note opens and the page doesn\'t scroll sideways', r)
+        await page2.screenshot(path='shots/fn1-phone.png')
+        for e in errors2: print('ERR(phone)', e)
+        await b2.close()
+
+        await page.screenshot(path='shots/fn1.png')
+        errs = [e for e in errors if 'favicon' not in e[1]]
+        ok(not errs, 'no errors in the console', errs[:5])
+        await b.close()
+    print('\nFAILED: ' + ', '.join(fails) if fails else '\nall passed')
+
+asyncio.run(main())

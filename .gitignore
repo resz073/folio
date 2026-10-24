@@ -1,0 +1,11 @@
+# test output (screenshots, PDFs, Word files)
+shots/
+# built files: python3 build.py makes them again (the fonts are kept: they are not built)
+dist/*
+!dist/fonts/
+# local leftovers
+__pycache__/
+node_modules/
+tests/dbg*.py
+tests/sp.py
+tests/deco2.py
